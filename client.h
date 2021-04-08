@@ -17,11 +17,11 @@ class QComboBox;
 
 class Client : public QObject
 {
-		Q_OBJECT
-private:
+	Q_OBJECT
+	private:
 	    std::map<int, QString> m_onlineUsers;
 		std::map<int, QString> m_dialogsMap;
-	
+
 		QString m_name;		
 		QWidget* m_logInWindow;
 		QLineEdit* m_logInField;
@@ -31,17 +31,17 @@ private:
 		QLineEdit* m_lineEdit;
 		QPushButton* m_sendButton;
 		QFormLayout* m_layout;
-		QMessageBox* m_msgBox;
 		QComboBox* m_userToWriteBox;
 		QTextEdit* m_txt;
 		QTcpSocket*	m_socket;
-		QTextEdit* m_txtForLogs;	
-public:
+		QTextEdit* m_txtForLogs;
+		QLabel* m_label;	
+	public:
 		void parseReceiveMessage(QString&);	
 		void parseRemoveOnlineUser(QString&);	
 		void parseAddOnlineUser(QString&);
 		void parseGetOnlineUsers(QString&);
-		void acknowledgementFromServer(QString&);
+		void accessFromServer(QString&);
 		void successfullyConnected();
 		void parseString(QString);
 		void addOnlineUser(QString, QString);
@@ -54,7 +54,7 @@ public:
 		void signalSlotConnections();
 		void layoutCreator();
 		void connectSocketToHost();
-public slots:
+	public slots:
 		void connectToSocketError(QAbstractSocket::SocketError);
 		void changeDialogBox(int);
 		void logInSlot();
@@ -62,7 +62,8 @@ public slots:
 		void mySocketRead();
 		void readFromTextBox();
 		void connectionLost();
-public:
+		void socketWasConnected();
+	public:
 		Client();
 		~Client();			
 };

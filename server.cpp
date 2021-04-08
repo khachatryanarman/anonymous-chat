@@ -1,5 +1,5 @@
-#include <QTcpServer>
 #include <QTcpSocket>
+#include <QTcpServer>
 #include <QDebug>
 #include <QString>
 #include <QHostAddress>
@@ -8,50 +8,43 @@
 #include "server.h"
 #include "clientmaster.h"
 	
-int Server::ID=0;
-void Server::notifyOtherClients(std::pair<QString, int> name)
+int Server::clientCounter = 0;
+void Server::notifyOtherClients(QString& username, int id)
 {
+	std::map<int, ClientMaster*>::iterator it = m_clientMasterMap.find(id);
+	if ( it != m_clientMasterMap.end() ) {
+		QString str = "3^";
+		QByteArray data = str.toLocal8Bit();
+		it->second->sendMessage(data);
+		it->second->getSocket()->waitForBytesWritten(1000);
+	}
 	QString newUser = "0^";
-	QString id = QString::number(name.second);
-	newUser.append(name.first+"^"+id);
+	QString ID = QString::number(id);
+	newUser.append(username + '^' + ID);
 	QByteArray array = newUser.toUtf8();
-	
-	for (std::map<std::pair<QString, int>,ClientMaster*>::iterator it=m_cmPointersMap.begin(); it != m_cmPointersMap.end(); ++it) {
-		if ( it->first != name && it->first.first !="" ) {
-			it->second->m_socket->write(array);
+	for (std::map<int, ClientMaster*>::iterator it = m_clientMasterMap.begin(); it != m_clientMasterMap.end(); ++it) {
+		if ( it->first != id && it->second->getName() != "" ) {
+			it->second->sendMessage(array);
 		}
 	}
 }
 
-bool Server::checkIfUserOnline(QString username)
+bool Server::checkIfUserOnline(int ID)
 {
-	QString ID = username.section("^", 4, 4);
-	QString name = username.section("^", 3, 3);
-	int id = ID.toInt();
-	std::pair <QString,int> idusername;
-    idusername = std::make_pair(name, id);
-
-	if (m_cmPointersMap.find(idusername) == m_cmPointersMap.end()) {
- 		return false;
+	if ( m_clientMasterMap.find(ID) == m_clientMasterMap.end() ) {
+		return false;
 	} else {
 		return true;   
 	}
 }
 
-void Server::clientSendMessage(QString& message)
+void Server::clientSendMessage(int ID, QString& message)
 {
-	if (checkIfUserOnline(message)) {
-		QString ID = message.section("^", 4, 4);
-		QString username = message.section("^", 3, 3);
-		int id = ID.toInt();
-		std::pair <QString,int> idusername;
-		idusername = std::make_pair(username, id);
-		ClientMaster* p_cm = m_cmPointersMap.find(idusername)->second;
+	if ( checkIfUserOnline(ID) ) {
+		ClientMaster* p_cm = m_clientMasterMap.find(ID)->second;
 		QByteArray arraymsg = message.toUtf8();
 		assert(0 != p_cm);
-		if (p_cm->m_socket->write(arraymsg) == -1) {
-			qDebug()<<"can't write to socket\n";	
-		}
+		p_cm->sendMessage(arraymsg);
 	} else {
 		qDebug()<<"can't send the message\n";
 	}
@@ -62,70 +55,51 @@ void Server::newConnectedClient()
 	assert(0 != m_server);
 	qDebug()<<"new client has been connected:\n";
 	QTcpSocket* psocket = m_server->nextPendingConnection();
+	
 	assert(0 != psocket);
-	ClientMaster* clientm = new ClientMaster(this, psocket, Server::ID);
-	std::pair<QString, int> idAndUsername = std::make_pair("", Server::ID);
-	m_cmPointersMap.insert(std::make_pair(idAndUsername, clientm));
-	QObject::connect(clientm, SIGNAL(newInitClientConnected(QString&, int)), this, SLOT(initNewClient(QString&, int)));
-	QObject::connect(clientm, SIGNAL(disconnected(ClientMaster*)), this, SLOT(clientDisconnected(ClientMaster*)));
-	QObject::connect(clientm, SIGNAL(messageToSend(QString&)), this, SLOT(clientSendMessage(QString&)));
-	Server::ID++;
+	qDebug()<<"Client with id: "<<Server::clientCounter;
+	ClientMaster* clientm = new ClientMaster(this, psocket, Server::clientCounter);
+	m_clientMasterMap.insert(std::make_pair(Server::clientCounter, clientm));
+	QObject::connect(clientm, SIGNAL(newInitClientConnected(QString&, int)), this, SLOT(notifyOtherClients(QString&, int)));
+	QObject::connect(clientm, SIGNAL(disconnected()), this, SLOT(clientDisconnected()));
+	QObject::connect(clientm, SIGNAL(messageToSend(int, QString&)), this, SLOT(clientSendMessage(int, QString&)));
+	++Server::clientCounter;
 }
 
-void Server::initNewClient(QString& username, int ID)
+void Server::clientDisconnected()
 {
-	std::pair<QString, int> ID_and_username = std::make_pair("", ID);
-	std::map<std::pair<QString, int>, ClientMaster*>::iterator it = m_cmPointersMap.find(ID_and_username);
-	if (it != m_cmPointersMap.end()) {
-		ID_and_username.first = username;
-		m_cmPointersMap.insert(std::make_pair(ID_and_username, it->second));
-		m_cmPointersMap.erase(it);
-		notifyOtherClients(ID_and_username);
-	}
-}
-
-void Server::clientDisconnected(ClientMaster* client)
-{
-	QString disconnectedUser = "1^";
-	int clientID = client->m_ID_of_client;
+	ClientMaster* pClient = dynamic_cast<ClientMaster*>(QObject::sender());
+	assert(0 != pClient);
+	int clientID = pClient->getId();
 	QString id = QString::number(clientID);
-	disconnectedUser.append(client->m_name_of_client + "^" + id);
+	QString disconnectedUser = "1^";
+	disconnectedUser.append(pClient->getName() + '^' + id);
 	QByteArray array = disconnectedUser.toLocal8Bit();
-	qDebug()<<"client "+client->m_name_of_client+":was disconnected";
-	
-	std::pair<QString, int> idAndUsername = std::make_pair(client->m_name_of_client, clientID);
-	
-	std::map<std::pair<QString, int>, ClientMaster*>::iterator it = m_cmPointersMap.find(idAndUsername);
-	if (it !=m_cmPointersMap.end() && it->first.first != "") {
+	std::map<int, ClientMaster*>::iterator it = m_clientMasterMap.find(clientID);
+	if ( it != m_clientMasterMap.end() && it->second->getName() != "" ) {
 		delete it->second;	 
-		m_cmPointersMap.erase(idAndUsername);
-		if (!m_cmPointersMap.empty()) {
-			for (std::map<std::pair<QString, int>,ClientMaster*>::iterator it=m_cmPointersMap.begin(); it != m_cmPointersMap.end(); ++it) {
-    	    	it->second->m_socket->write(array);
-   			}
-		}
+		m_clientMasterMap.erase(clientID);	 
+		for (std::map<int, ClientMaster*>::iterator it = m_clientMasterMap.begin(); it != m_clientMasterMap.end(); ++it) {
+    	    it->second->sendMessage(array);
+   		}
 	}
 }
 
 QByteArray Server::getOnlineUsersList(int id)
 {
 	QString msg = "5^";
-	QByteArray data;
-	if (!m_cmPointersMap.empty()) {
-		for (std::map<std::pair<QString,int>, ClientMaster*>::iterator it=m_cmPointersMap.begin(); it != m_cmPointersMap.end(); ++it) {
-			if (it->first.second != id && it->first.first != "") {
-				QString ID = QString::number(it->first.second);
-    			msg.append(it->first.first + "^" + ID + "^");
-			}
-    	}
-		data = msg.toLocal8Bit();
-	}
-	return data;
+	for (std::map<int, ClientMaster*>::iterator it = m_clientMasterMap.begin(); it != m_clientMasterMap.end(); ++it) {
+		if ( it->first != id && it->second->getName() != "" ) {
+			QString ID = QString::number(it->first);
+    		msg.append(it->second->getName() + "^" + ID + "^");
+		}
+    }
+	return msg.toLocal8Bit();
 }
 
 Server::Server()
-	: QObject(),
-	 m_server(0)
+	: QObject()
+	, m_server(0)
 {
 	m_server = new QTcpServer;
 	m_server->listen(QHostAddress::LocalHost, 3333);
@@ -135,5 +109,6 @@ Server::Server()
 
 Server::~Server()
 {	
-
+	assert(0 != m_server);
+	m_server->deleteLater();
 }

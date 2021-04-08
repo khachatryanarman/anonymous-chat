@@ -11,22 +11,19 @@ class Server : public QObject
 {
 	Q_OBJECT 
 	private:
-		static int ID;
-		std::map<std::pair<QString, int> , ClientMaster*> m_cmPointersMap;
+		static int clientCounter;
+		std::map<int, ClientMaster*> m_clientMasterMap;
 		QTcpServer* m_server;
 	public:
-		void notifyOtherClients(std::pair<QString, int>);
-		void sendOnlineUsers(std::pair<QString, int>);
-		bool checkIfUserOnline(QString);
+		bool checkIfUserOnline(int);
 		QByteArray getOnlineUsersList(int);
 	public slots:
+		void notifyOtherClients(QString&, int);
 		void newConnectedClient();
-		void clientDisconnected(ClientMaster*);
-		void clientSendMessage(QString&);
-		void initNewClient(QString&, int);
+		void clientDisconnected();
+		void clientSendMessage(int, QString&);
 	public:	
 		Server();
 		~Server();
 };
-
 #endif

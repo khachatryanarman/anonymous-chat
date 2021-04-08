@@ -16,10 +16,30 @@
 #include <QLabel>
 #include <QIcon>
 #include <assert.h>
+#include <stdlib.h>
+#include <unistd.h>
+	
+void Client::parseString(QString str_data)
+{
+	QString command = str_data.section('^', 0, 0);
+	int commandID = command.toInt();
+	switch (commandID) {
+   		case 0: parseAddOnlineUser(str_data);
+    		break;
+  		case 1:	parseRemoveOnlineUser(str_data);
+    		break;
+		case 3: accessFromServer(str_data);
+			break;
+		case 4:	parseReceiveMessage(str_data);	
+			break;		
+		case 5: parseGetOnlineUsers(str_data);
+			break;
+	}
+}
 
 void Client::changeDialogBox(int index)
 {
-	if (-1 == index) {
+	if ( -1 == index ) {
 		return;
 	}
 	assert(0 != m_userToWriteBox);
@@ -28,9 +48,16 @@ void Client::changeDialogBox(int index)
 	m_txt->clear();
 	int id = m_userToWriteBox->itemData(index, Qt::UserRole).toInt();
     std::map<int, QString>::iterator it = m_dialogsMap.find(id);
-	if (it != m_dialogsMap.end()) {	
+	if ( it != m_dialogsMap.end() ) {	
 		m_txt->setText(it->second);	
 	}
+}
+
+void Client::socketWasConnected()
+{
+	assert(0 != m_label);
+	m_txtForLogs->append("connection was established");
+	m_label->setText("now server is available");
 }
 
 void Client::logInSlot()
@@ -38,19 +65,15 @@ void Client::logInSlot()
 	assert(0 != m_logInField);
 	assert(0 != m_socket);
 	assert(0 != m_logInWindow);	
-	assert(0 != m_window);
 	assert(0 != m_logInLayout);
     static bool alreadyAdded = false;
-	if (!m_logInField->text().isEmpty() && !(m_logInField->text().contains('^'))) {
+	if ( !m_logInField->text().isEmpty() && !(m_logInField->text().contains('^')) ) {
 		m_name = m_logInField->text();
-		if (m_socket->state() == QTcpSocket::ConnectedState) {
-			m_logInWindow->hide();
-			m_window->setWindowTitle(m_name);
+		if ( m_socket->state() == QTcpSocket::ConnectedState ) {
 			successfullyConnected();
-		} else if (!alreadyAdded) {
-			QLabel* label = new QLabel();
-			label->setText("you are'nt connected yet");
-			m_logInLayout->addWidget(label);
+		} else if ( !alreadyAdded ) {
+			m_label->setText("you are'nt connected yet");
+			m_logInLayout->addWidget(m_label);
 			alreadyAdded = true; 
 		}
 	} else {
@@ -60,27 +83,41 @@ void Client::logInSlot()
 
 void Client::connectToSocketError(QAbstractSocket::SocketError)
 {
-	assert(0 != m_socket);
-	m_socket->close();
-	m_socket->connectToHost(QHostAddress::LocalHost, 3333);
+	m_userToWriteBox->clear();
+	if ( m_socket->state() != QTcpSocket::ConnectedState && m_socket->state() != QTcpSocket::ConnectingState() {
+		assert(0 != m_socket);
+		m_socket->abort();
+		m_socket->connectToHost(QHostAddress::LocalHost, 3333);
+		successfullyConnected();
+	}	
 }
 
 void Client::connectionLost()
-{
+{	
 	assert(0 != m_window);
-	assert(0 != m_msgBox);
-	m_window->hide();
-	m_msgBox->show();	
+	assert(0 != m_socket);
+	m_txtForLogs->append("Connection to the server was lost");
+	if ( m_socket->state() != QTcpSocket::ConnectedState && m_socket->state() != QTcpSocket::ConnectingState ) {	
+		assert(0 != m_socket);
+		m_socket->abort();
+		m_socket->connectToHost(QHostAddress::LocalHost, 3333);
+	}
 }
 
-void Client::acknowledgementFromServer(QString& data)
+void Client::accessFromServer(QString& data)
 {
+	assert(0 != m_logInWindow);
+	assert(0 != m_window);
+	m_logInWindow->hide();
+	m_window->setWindowTitle(m_name);
+	m_window->show();
 }
 
 void Client::getOnlineUsers()
 {
-	m_window->hide();
+	assert(0 != m_window);
 	assert(0 != m_socket);
+	m_window->hide();
 	qDebug()<<"request for online users";
 	QString online = "5^";
 	QByteArray data = online.toLocal8Bit();
@@ -93,16 +130,16 @@ void Client::readFromTextBox()
 	assert(0 != m_txt);
 	assert(0 != m_userToWriteBox);
 	
-	if (!m_lineEdit->text().isEmpty()) {
+	if ( !m_lineEdit->text().isEmpty() ) {
 		m_txt->setTextColor(QColor(185,0,0));
 		QString msgToSend = m_lineEdit->text();
-		if (m_userToWriteBox->currentIndex() != -1) {
+		if ( m_userToWriteBox->currentIndex() != -1 ) {
 			m_txt->append("You: "+msgToSend);
 		} else {
 			m_txt->setTextColor(QColor(192, 192, 192));
 			m_txtForLogs->append("all users are offline");
 		}
-		if (m_userToWriteBox->currentText() != "") {
+		if ( m_userToWriteBox->currentText() != "" ) {
 			int index = m_userToWriteBox->currentIndex();	
 			int ID = m_userToWriteBox->itemData(index, Qt::UserRole).toInt();	
 			QString receiver = m_userToWriteBox->itemText(index);
@@ -117,7 +154,7 @@ void Client::readFromTextBox()
 void Client::showOnlineUsers()
 {	
 	assert(0 != m_userToWriteBox);
-	if (!m_onlineUsers.empty()) {
+	if ( !m_onlineUsers.empty() ) {
          for (std::map<int, QString>::iterator it = m_onlineUsers.begin(); it != m_onlineUsers.end(); ++it) {
 			m_userToWriteBox->addItem(QIcon(),it->second, it->first);
 		}
@@ -126,13 +163,11 @@ void Client::showOnlineUsers()
 
 void Client::successfullyConnected()
 {
-	assert(0 != m_window);
 	assert(0 != m_socket);
 	QString sendName = "3^";
 	sendName.append(m_name);
 	QByteArray data = sendName.toLocal8Bit();
     m_socket->write(data);
-	m_window->show();
 }
 
 void Client::mySocketRead()
@@ -155,14 +190,16 @@ void Client::parseAddOnlineUser(QString& str)
 
 void Client::parseRemoveOnlineUser(QString& str)
 {	
-	assert(0 != m_txt);
+	assert(0 != m_txtForLogs);
 	QString name = str.section('^', 1, 1);
 	QString id = str.section('^', 2, 2);
 	std::map<int, QString>::iterator it = m_dialogsMap.find(id.toInt());
 	if (it != m_dialogsMap.end()) {
 		m_dialogsMap.erase(it);
+	} else {
+		qDebug()<<"cant find user by id";
+		return;
 	}
-
 	removeOnlineUser(id);
 	m_txtForLogs->append(name + " left the chat");
 }
@@ -180,40 +217,23 @@ void Client::parseGetOnlineUsers(QString& str)
 {
 	int i = 1;
 	int count = str.count('^') - 1;
-	while (i < count)	{
+	while (i < count) {
 		QString username = str.section('^', i, i);
 		QString ID = str.section('^', i+1, i+1);
 	    m_onlineUsers.insert(std::make_pair(ID.toInt(), username));
 		QString dialogstr;
 	    m_dialogsMap.insert(std::make_pair(ID.toInt(), dialogstr));	
-	
 		i += 2;
 	}
 	showOnlineUsers();
 }
 
-void Client::parseString(QString str_data)
-{
-	QString command = str_data.section('^', 0, 0);
-	int commandID = command.toInt();
-	switch (commandID) {
-   		case 0: parseAddOnlineUser(str_data);
-    		break;
-  		case 1:	parseRemoveOnlineUser(str_data);
-    		break;
-		case 3: acknowledgementFromServer(str_data);
-			break;
-		case 4:	parseReceiveMessage(str_data);	
-			break;		
-		case 5: parseGetOnlineUsers(str_data);
-			break;
-	}
-}
 
 void Client::addOnlineUser(QString name, QString ID)
 {
 	assert(0 != m_userToWriteBox);
 	assert(0 != m_txt);
+	assert(0 != m_txtForLogs);
 	int id = ID.toInt();
 	m_onlineUsers.insert(std::make_pair(id, name));
     m_userToWriteBox->addItem(QIcon(), name, id);
@@ -239,7 +259,7 @@ void Client::removeOnlineUser(QString id)
 		m_onlineUsers.erase(it);
 	}
 	int indexOf = m_userToWriteBox->findData(ID, Qt::UserRole);
-	if (-1 != indexOf) {
+	if ( -1 != indexOf ) {
 		m_userToWriteBox->removeItem(indexOf);
 	} else {
 		qDebug()<<"can't delete field from comboBox";
@@ -251,9 +271,10 @@ void Client::receiveMessage(QString name, int id, QString receiveMessage)
 	assert(0 != m_txt);
 	assert(0 != m_userToWriteBox);
 	m_txt->setTextColor(QColor(0,0,185));
-	if( id == m_userToWriteBox->itemData(m_userToWriteBox->currentIndex(), Qt::UserRole).toInt()  && name == m_userToWriteBox->currentText()) {
+	if( id == m_userToWriteBox->itemData(m_userToWriteBox->currentIndex(), Qt::UserRole).toInt()  && name == m_userToWriteBox->currentText() ) {
 		m_txt->append(name + ": " + receiveMessage);
 	} else {
+		assert(0 != m_txtForLogs);
 		m_txtForLogs->setTextColor(QColor(0,120,0));
 		m_txtForLogs->append("new message from " + name);
 		m_txtForLogs->setTextColor(QColor(192,192,192));
@@ -290,16 +311,17 @@ void Client::initOfObjects()
 	m_lineEdit = new QLineEdit;
 	m_sendButton = new QPushButton("send");
 	m_layout = new QFormLayout(m_window);
-	m_msgBox = new QMessageBox;
 	m_userToWriteBox = new QComboBox;
 	m_txt = new QTextEdit; 
 	m_socket = new QTcpSocket;
 	m_txtForLogs = new QTextEdit;
+	m_label = new QLabel();
 }
 
 void Client::connectSocketToHost()
 {
 	assert(0 != m_socket);
+	m_socket->setSocketOption(QAbstractSocket::KeepAliveOption, 1);
 	m_socket->connectToHost(QHostAddress::LocalHost, 3333);
 }
 
@@ -310,7 +332,6 @@ void Client::layoutCreator()
 	assert(0 != m_logInWindow);
 	assert(0 != m_txt);
 	assert(0 != m_layout);
-	assert(0 != m_msgBox);	
 	assert(0 != m_txtForLogs);
 	assert(0 != m_layout);
 	assert(0 != m_lineEdit);
@@ -330,7 +351,6 @@ void Client::layoutCreator()
 	m_layout->addWidget(m_userToWriteBox);
 	m_layout->addWidget(m_lineEdit);
 	m_layout->addWidget(m_sendButton);
-    m_msgBox->setText("Connection Lost");
 	QRect screenGeometry = QApplication::desktop()->screenGeometry();
     int x = (screenGeometry.width() - m_window->width()) / 2;
     int y = (screenGeometry.height() - m_window->height()) / 2;
@@ -354,34 +374,31 @@ void Client::signalSlotConnections()
 	QObject::connect(m_logInButton, SIGNAL(clicked()), this, SLOT(logInSlot()));
 	QObject::connect(m_socket, SIGNAL(disconnected()), this, SLOT(connectionLost()));
 	QObject::connect(m_socket, SIGNAL(readyRead()), this, SLOT(mySocketRead()));
+	QObject::connect(m_socket, SIGNAL(connected()), this, SLOT(socketWasConnected()));
 	QObject::connect(m_lineEdit, SIGNAL(returnPressed()), this, SLOT(readFromTextBox()));
 	QObject::connect(m_sendButton, SIGNAL(clicked()), this, SLOT(readFromTextBox()));
 	QObject::connect(m_socket, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(connectToSocketError(QAbstractSocket::SocketError)));
 }
 
 Client::Client()
-	: QObject(),
-	m_logInWindow(0), 
-	m_logInField(0),
-	m_logInButton(0),
-	m_logInLayout(0),
-	m_window(0),
-	m_lineEdit(0),
-	m_sendButton(0),
-	m_layout(0),
-	m_msgBox(0),
-	m_userToWriteBox(0),
-	m_txt(),
-	m_socket(0),
-	m_txtForLogs(0)
+	: QObject()	
+	, m_logInWindow(0) 
+	, m_logInField(0)
+	, m_logInButton(0)
+	, m_logInLayout(0)
+	, m_window(0)
+	, m_lineEdit(0)
+	, m_sendButton(0)
+	, m_layout(0)
+	, m_userToWriteBox(0)
+	, m_txt()
+	, m_socket(0)
+	, m_txtForLogs(0)
+	, m_label(0)
 {
 	initOfObjects();
 	layoutCreator();
 	signalSlotConnections();
 	connectSocketToHost();
 }
-
-Client::~Client()
-{
-	
-}
+Client::~Client(){}
